@@ -1,0 +1,70 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: smartspend
+      POSTGRES_PASSWORD: smartspend
+      POSTGRES_DB: smartspend
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartspend -d smartspend"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  transaction-service:
+    build: ./services/transaction-service
+    environment:
+      DATABASE_URL: postgresql+psycopg2://smartspend:smartspend@postgres:5432/smartspend
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  anomaly-service:
+    build: ./services/anomaly-service
+    environment:
+      TRANSACTION_SERVICE_URL: http://transaction-service:8000
+    ports:
+      - "8003:8000"
+    depends_on:
+      - transaction-service
+
+  finance-mcp-server:
+    build: ./services/finance-mcp-server
+    environment:
+      TRANSACTION_SERVICE_URL: http://transaction-service:8000
+      ANOMALY_SERVICE_URL: http://anomaly-service:8000
+    ports:
+      - "8002:8002"
+    depends_on:
+      - transaction-service
+      - anomaly-service
+
+  agent-service:
+    build: ./services/agent-service
+    environment:
+      MCP_URL: http://finance-mcp-server:8002/mcp
+      LLM_PROVIDER: gemini
+      GEMINI_MODEL: gemini-flash-latest
+      GEMINI_FALLBACK_MODEL: gemini-3.5-flash-lite
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+    ports:
+      - "8004:8000"
+    depends_on:
+      - finance-mcp-server
+
+  frontend:
+    build: ./services/frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - transaction-service
+      - anomaly-service
+      - agent-service
+
+volumes:
+  pgdata:
